@@ -1,0 +1,828 @@
+---
+title: "Diversity Measures and Visualisation"
+author: "Catherine Purse"
+date: "2024-11-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This R markdown file contains the code needed to calculate both alpha and beta diversity measures for the metagenomic dataset explored in the manuscript "Biogeography but not age affects the captive-bred cynomolgus macaque intestinal microbiome.". It also contains the necessary code for visualisation of the diversity metrics.
+
+* Load libraries
+```{r}
+library(phyloseq)
+library(tidyverse)
+library(microbiome)
+library(grafify)
+library(microViz)
+library(patchwork)
+library(nlme)
+library(vegan)
+library(pairwiseAdonis)
+```
+
+* Load Phyloseq object
+```{r}
+species_physeq.noEuk <- readRDS("species_phyloseq.rds")
+```
+
+* Colour palette
+```{r}
+cb_palette <- c("#ee8866", "#77aadd","#d3d3d3","#FDF28E","#8ED29B","#bbccee", "#AFC30A","#cc99cc","#C1E49C","#dd7788", "#009E73")
+```
+
+# Beta
+
+* Plot ordination and perform PERMANOVA with pairwise comparisons
+```{r}
+## Reorder Region and Age Group factor levels
+# Get sample data from the phyloseq object
+sample_data_df <- as.data.frame(sample_data(species_physeq.noEuk))
+
+# Reorder factor levels - Region
+sample_data_df$type <- factor(sample_data_df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Reorder factor levels - Age Group
+sample_data_df$agegroup <- factor(sample_data_df$agegroup, levels=c("Young", "Adult", "Aged"))
+
+# Update the sample data in the phyloseq object
+sample_data(species_physeq.noEuk) <- sample_data(sample_data_df)
+
+# Ordination
+set.seed(123)
+mpa.ord <- ordinate(species_physeq.noEuk, "NMDS", "bray")
+
+# Plot
+mpa.ord.plot <- plot_ordination(species_physeq.noEuk, mpa.ord, type="samples", color="type", shape="agegroup") +
+  theme_bw() +
+  scale_shape_discrete(name = "Age Group") +
+  theme(text = element_text(size = 15)) +
+  geom_point(size = 4) +
+  scale_color_manual(name = "Region", values = cb_palette)
+print(mpa.ord.plot)
+
+# PERMANOVA
+head(sample_data(species_physeq.noEuk))
+bray <- phyloseq::distance(species_physeq.noEuk, method = "bray")
+sam <- data.frame(sample_data(species_physeq.noEuk))
+adonis2(bray ~ agegroup + type + agegroup*type, data = sam, permutations = 999, strata = sam$id)
+
+# Pairwise comparisons
+pw.age <- pairwise.adonis2(bray ~ agegroup, data = sam, p_adjust_m = 'BH', strata = 'id')
+pw.type <- pairwise.adonis2(bray ~ type, data = sam, p_adjust_m = 'BH', strata = 'agegroup')
+```
+
+* Get summary tables and significance matrix for the PERMANOVA and pairwise comp.
+```{r}
+# Function to extract p-values from pairwise comparisons
+extract_pvalues <- function(pw_result) {
+  p_values <- sapply(pw_result[-1], function(x) x$`Pr(>F)`[1])
+  names(p_values) <- gsub("_vs_", "-", names(p_values))
+  return(p_values)
+}
+
+# Extract p-values
+age_pvalues <- extract_pvalues(pw.age)
+type_pvalues <- extract_pvalues(pw.type)
+
+# Create summary tables
+age_summary <- data.frame(
+  Comparison = names(age_pvalues),
+  p.value = age_pvalues,
+  Significant = ifelse(age_pvalues < 0.05, "*", "")
+)
+
+type_summary <- data.frame(
+  Comparison = names(type_pvalues),
+  p.value = type_pvalues,
+  Significant = ifelse(type_pvalues < 0.05, "*", "")
+)
+
+age_summary
+type_summary
+
+# Export
+write.csv(age_summary,"C:/Users/purse/OneDrive - Norwich BioScience Institutes/Results/NHP Bioinformatics/CM_Prokaryome_Paper_Oct2024/R_Analysis/Results/Ordination_Pairwise_Age_Summary.csv", row.names = TRUE)
+
+write.csv(type_summary,"C:/Users/purse/OneDrive - Norwich BioScience Institutes/Results/NHP Bioinformatics/CM_Prokaryome_Paper_Oct2024/R_Analysis/Results/Ordination_Pairwise_Type_Summary.csv", row.names = TRUE)
+```
+
+* Export ordination plot
+```{r}
+folder_path <- "C:/Users/purse/OneDrive - Norwich BioScience Institutes/Results/NHP Bioinformatics/CM_Prokaryome_Paper_Oct2024/R_Analysis/Plots"
+tiff(file.path(folder_path, "prokaryome_ordination.tiff"), units="in", width=6.5, height=5, res=300)
+plot(mpa.ord.plot)
+dev.off()
+```
+
+
+# Alpha
+* Showing regional and age-associated differences in alpha diversity + performing statistical tests
+
+## Regions - Chao1
+```{r}
+chao <- boxplot_alpha(species_physeq.noEuk,
+                          index = "chao1",
+                          x_var = "type",
+                          )
+
+p.chao <- chao + scale_x_discrete() +
+  theme_bw() +
+  labs(x="Spatial Region", y="Chao1") +
+    theme(axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        legend.position ='none') +
+  scale_fill_manual(name = "Region", values = cb_palette)
+p.chao
+```
+
+# Statistical comparisons - Chao1
+```{r}
+chao.reg <- meta(species_physeq.noEuk)
+chao.reg$diversity <- microbiome::alpha(species_physeq.noEuk, index = "all")$chao1
+
+# Define the regions for releveling
+regions <- c("D", "J", "I", "C", "PC", "DC")
+
+# Initialize an empty list to store results
+chao_results_list <- list()
+
+# Initialize a list to store all p-values
+all_p_values <- c()
+
+# Loop over each region, relevel, fit the model, and store the results
+for (region in regions) {
+  chao.reg$type <- relevel(chao.reg$type, ref = region)
+  
+  model <- lme(diversity ~ type, random = ~ 1 | id, data = chao.reg, method = "REML")
+  
+  st <- summary(model)
+  tabl <- as.data.frame(st$tTable)  # Convert the tTable to a data frame
+  
+  # Add a column to identify the reference region
+  tabl$Reference <- region
+  
+  # Add a column to indicate significance based on p-value
+  tabl$Significant <- ifelse(tabl$`p-value` < 0.05, "Yes", "No")
+  
+  # Store the result in the list
+  chao_results_list[[region]] <- tabl
+  
+    # Collect all p-values (excluding the intercept)
+  all_p_values <- c(all_p_values, tabl$`p-value`[-1])
+}
+
+# Apply FDR correction to all p-values
+adjusted_p_values <- p.adjust(all_p_values, method = "BH")
+
+# Initialize an index to keep track of which adjusted p-value to use
+adj_p_index <- 1
+
+# Loop through the results again to add adjusted p-values and significance
+for (region in regions) {
+  tabl <- chao_results_list[[region]]
+  
+  # Add adjusted p-values (skip the intercept)
+  tabl$adjusted_p_value <- c(NA, adjusted_p_values[adj_p_index:(adj_p_index + nrow(tabl) - 2)])
+  
+  # Update the index
+  adj_p_index <- adj_p_index + nrow(tabl) - 1
+  
+  # Add a column to indicate significance based on adjusted p-value
+  tabl$Significant <- ifelse(tabl$adjusted_p_value < 0.05, "Yes", "No")
+  
+  # Update the result in the list
+  chao_results_list[[region]] <- tabl
+}
+# Combine all the results into a single data frame
+chao_results_df <- do.call(rbind, chao_results_list)
+
+# Display the combined data frame with significance column
+chao_results_df
+
+# Create the summary table
+chao_summary_table <- chao_results_df %>%
+  filter(grepl("^[A-Z]+\\.type[A-Z]+$", rownames(.))) %>%  # Filter rows with type comparisons
+  mutate(
+    Comparison = paste0(Reference, "-", sub(".*type", "", rownames(.))),
+    Significant = ifelse(Significant == "Yes", "*", "")
+  ) %>%
+  select(Comparison, Value, `p-value`, Significant) %>%
+  arrange(Comparison)
+
+# Create a matrix of significance
+chao_sig_matrix <- chao_summary_table %>%
+  mutate(From = sub("-.*", "", Comparison),
+         To = sub(".*-", "", Comparison)) %>%
+  select(From, To, Significant) %>%
+  pivot_wider(names_from = To, values_from = Significant, values_fill = "") %>%
+  column_to_rownames("From")
+
+# Make the matrix symmetrical and remove self-comparisons
+for(i in rownames(chao_sig_matrix)) {
+  for(j in colnames(chao_sig_matrix)) {
+    if(i == j) {
+      chao_sig_matrix[i, j] = ""
+    } else if(chao_sig_matrix[i, j] == "" && chao_sig_matrix[j, i] != "") {
+      chao_sig_matrix[i, j] = chao_sig_matrix[j, i]
+    }
+  }
+}
+
+# Reorder matrix
+desired_order <- c("D", "J", "I", "C", "PC", "DC")
+chao_sig_matrix <- chao_sig_matrix %>%
+  select(all_of(desired_order)) %>%
+  slice(match(desired_order, rownames(.)))
+
+# Print the results
+print(chao_summary_table)
+print(chao_sig_matrix)
+```
+
+
+# Regions - Inverse Simpson
+```{r}
+# Diversity Inverse Simpson
+inverse_simpson <- boxplot_alpha(species_physeq.noEuk,
+                          index = "inverse_simpson",
+                          x_var = "type",
+                          )
+
+p.inverse_simpson <- inverse_simpson + 
+  scale_x_discrete() +
+  theme_bw() +
+  labs(x="Spatial Region", y="Inverse Simpson") +
+  theme(axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        legend.position ='none') +
+  scale_fill_manual(name = "Region", values = cb_palette)
+p.inverse_simpson
+```
+
+# Statistical comparisons - Diversity Inverse Simpson
+```{r}
+inverse_simpson.reg <- meta(species_physeq.noEuk)
+inverse_simpson.reg$diversity <- microbiome::alpha(species_physeq.noEuk, index = "all")$diversity_inverse_simpson
+
+# Define the regions for releveling
+regions <- c("D", "J", "I", "C", "PC", "DC")
+
+# Initialize an empty list to store results
+inverse_simpson_results_list <- list()
+
+# Initialize a list to store all p-values
+all_p_values <- c()
+
+# Loop over each region, relevel, fit the model, and store the results
+for (region in regions) {
+  inverse_simpson.reg$type <- relevel(inverse_simpson.reg$type, ref = region)
+  
+  model <- lme(diversity ~ type, random = ~ 1 | id, data = inverse_simpson.reg, method = "REML")
+  
+  st <- summary(model)
+  tabl <- as.data.frame(st$tTable)  # Convert the tTable to a data frame
+  
+  # Add a column to identify the reference region
+  tabl$Reference <- region
+  
+  # Add a column to indicate significance based on p-value
+  tabl$Significant <- ifelse(tabl$`p-value` < 0.05, "Yes", "No")
+  
+  # Store the result in the list
+  inverse_simpson_results_list[[region]] <- tabl
+  
+  # Collect all p-values (excluding the intercept)
+  all_p_values <- c(all_p_values, tabl$`p-value`[-1])
+}
+
+# Apply FDR correction to all p-values
+adjusted_p_values <- p.adjust(all_p_values, method = "BH")
+
+# Initialize an index to keep track of which adjusted p-value to use
+adj_p_index <- 1
+
+# Loop through the results again to add adjusted p-values and significance
+for (region in regions) {
+  tabl <- inverse_simpson_results_list[[region]]
+  
+  # Add adjusted p-values (skip the intercept)
+  tabl$adjusted_p_value <- c(NA, adjusted_p_values[adj_p_index:(adj_p_index + nrow(tabl) - 2)])
+  
+  # Update the index
+  adj_p_index <- adj_p_index + nrow(tabl) - 1
+  
+  # Add a column to indicate significance based on adjusted p-value
+  tabl$Significant <- ifelse(tabl$adjusted_p_value < 0.05, "Yes", "No")
+  
+  # Update the result in the list
+  inverse_simpson_results_list[[region]] <- tabl
+}
+
+# Combine all the results into a single data frame
+inverse_simpson_results_df <- do.call(rbind, inverse_simpson_results_list)
+
+# Display the combined data frame with significance column
+inverse_simpson_results_df
+
+# Create the summary table
+inverse_simpson_summary_table <- inverse_simpson_results_df %>%
+  filter(grepl("^[A-Z]+\\.type[A-Z]+$", rownames(.))) %>%  # Filter rows with type comparisons
+  mutate(
+    Comparison = paste0(Reference, "-", sub(".*type", "", rownames(.))),
+    Significant = ifelse(Significant == "Yes", "*", "")
+  ) %>%
+  select(Comparison, Value, `p-value`, Significant) %>%
+  arrange(Comparison)
+
+# Create a matrix of significance
+inverse_simpson_sig_matrix <- inverse_simpson_summary_table %>%
+  mutate(From = sub("-.*", "", Comparison),
+         To = sub(".*-", "", Comparison)) %>%
+  select(From, To, Significant) %>%
+  pivot_wider(names_from = To, values_from = Significant, values_fill = "") %>%
+  column_to_rownames("From")
+
+# Create the significance matrix
+inverse_simpson_sig_matrix <- inverse_simpson_summary_table %>%
+  mutate(From = sub("-.*", "", Comparison),
+         To = sub(".*-", "", Comparison)) %>%
+  select(From, To, Significant) %>%
+  pivot_wider(names_from = To, values_from = Significant, values_fill = "") %>%
+  column_to_rownames("From")
+
+# Reorder matrix
+desired_order <- c("D", "J", "I", "C", "PC", "DC")
+inverse_simpson_sig_matrix <- inverse_simpson_sig_matrix[desired_order, desired_order]
+
+# Fill diagonal with empty strings
+diag(inverse_simpson_sig_matrix) <- ""
+
+# Print the results
+print(inverse_simpson_summary_table)
+print(inverse_simpson_sig_matrix)
+```
+
+
+# Regions - Shannon
+```{r}
+# Regions - Shannon
+shannon <- boxplot_alpha(species_physeq.noEuk,
+                          index = "shannon",
+                          x_var = "type",
+                          )
+
+p.shannon <- shannon + scale_x_discrete() +
+  theme_bw() +
+  labs(x="Spatial Region", y="Shannon") +
+    theme(axis.text.x = element_text(size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        legend.position ='none') +
+  scale_fill_manual(name = "Region", values = cb_palette)
+p.shannon
+```
+
+# Statistical comparisons - Shannon
+```{r}
+sh.reg <- meta(species_physeq.noEuk)
+sh.reg$diversity <- microbiome::alpha(species_physeq.noEuk, index = "all")$diversity_shannon
+
+# Define the regions for releveling
+regions <- c("D", "J", "I", "C", "PC", "DC")
+
+# Initialize an empty list to store results
+diversity_shannon_results_list <- list()
+
+# Initialize a list to store all p-values
+all_p_values <- c()
+
+# Loop over each region, relevel, fit the model, and store the results
+for (region in regions) {
+  sh.reg$type <- relevel(sh.reg$type, ref = region)
+  
+  model <- lme(diversity ~ type, random = ~ 1 | id, data = sh.reg, method = "REML")
+  
+  st <- summary(model)
+  tabl <- as.data.frame(st$tTable)  # Convert the tTable to a data frame
+  
+  # Add a column to identify the reference region
+  tabl$Reference <- region
+  
+  # Add a column to indicate significance based on p-value
+  tabl$Significant <- ifelse(tabl$`p-value` < 0.05, "Yes", "No")
+  
+  # Store the result in the list
+  diversity_shannon_results_list[[region]] <- tabl
+  
+  # Collect all p-values (excluding the intercept)
+  all_p_values <- c(all_p_values, tabl$`p-value`[-1])
+}
+
+# Apply FDR correction to all p-values
+adjusted_p_values <- p.adjust(all_p_values, method = "BH")
+
+# Initialize an index to keep track of which adjusted p-value to use
+adj_p_index <- 1
+
+# Loop through the results again to add adjusted p-values and significance
+for (region in regions) {
+  tabl <- diversity_shannon_results_list[[region]]
+  
+  # Add adjusted p-values (skip the intercept)
+  tabl$adjusted_p_value <- c(NA, adjusted_p_values[adj_p_index:(adj_p_index + nrow(tabl) - 2)])
+  
+  # Update the index
+  adj_p_index <- adj_p_index + nrow(tabl) - 1
+  
+  # Add a column to indicate significance based on adjusted p-value
+  tabl$Significant <- ifelse(tabl$adjusted_p_value < 0.05, "Yes", "No")
+  
+  # Update the result in the list
+  diversity_shannon_results_list[[region]] <- tabl
+}
+# Combine all the results into a single data frame
+shannon_results_df <- do.call(rbind, diversity_shannon_results_list)
+
+# Display the combined data frame with significance column
+shannon_results_df
+
+# Create the summary table
+shannon_summary_table <- shannon_results_df %>%
+  filter(grepl("^[A-Z]+\\.type[A-Z]+$", rownames(.))) %>%  # Filter rows with type comparisons
+  mutate(
+    Comparison = paste0(Reference, "-", sub(".*type", "", rownames(.))),
+    Significant = ifelse(Significant == "Yes", "*", "")
+  ) %>%
+  select(Comparison, Value, `p-value`, Significant) %>%
+  arrange(Comparison)
+
+# Create a matrix of significance
+shannon_sig_matrix <- shannon_summary_table %>%
+  mutate(From = sub("-.*", "", Comparison),
+         To = sub(".*-", "", Comparison)) %>%
+  select(From, To, Significant) %>%
+  pivot_wider(names_from = To, values_from = Significant, values_fill = "") %>%
+  column_to_rownames("From")
+
+# Make the matrix symmetrical and remove self-comparisons
+for(i in rownames(shannon_sig_matrix)) {
+  for(j in colnames(shannon_sig_matrix)) {
+    if(i == j) {
+      shannon_sig_matrix[i, j] = ""
+    } else if(shannon_sig_matrix[i, j] == "" && shannon_sig_matrix[j, i] != "") {
+      shannon_sig_matrix[i, j] = shannon_sig_matrix[j, i]
+    }
+  }
+}
+
+# Reorder matrix
+desired_order <- c("D", "J", "I", "C", "PC", "DC")
+shannon_sig_matrix <- shannon_sig_matrix %>%
+  select(all_of(desired_order)) %>%
+  slice(match(desired_order, rownames(.)))
+
+# Print the results
+print(shannon_summary_table)
+print(shannon_sig_matrix)
+```
+
+# Regions - Patchwork
+* Export
+```{r}
+reg.alpha_patchwork <- p.chao / p.inverse_simpson / p.shannon +
+   plot_layout(ncol = 2, guides = "collect", axis_titles = "collect")
+reg.alpha_patchwork
+
+tiff(file.path(folder_path, "prokaryome_alpha_regions.tiff"), units="in", width=8, height=6, res=300)
+plot(reg.alpha_patchwork)
+dev.off()
+```
+
+
+# Age - Chao1
+```{r}
+chao <- meta(species_physeq.noEuk)
+chao$diversity <- microbiome::alpha(species_physeq.noEuk, index = "all")$chao1
+
+# Chao1 - Linear regression for all regions
+# Plot
+c_age_chao <- ggplot(chao,
+       aes(x=age,
+           y=diversity))+
+  geom_point()+
+  geom_smooth(method = "lm",
+              se = FALSE,
+              colour = "#77aadd")+
+  theme_light() +
+  theme(axis.text.x = element_text(angle=0, size=10), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold")) +
+  facet_grid("type") +
+  xlab("Age (Years)") + 
+  ylab("Chao1")
+
+# Linear regressions per sample site
+
+# Initialize an empty list to store results
+a_diversity_chao_results_list <- list()
+
+# Initialize a list to store all p-values
+all_p_values <- c()
+
+# Define the regions for releveling
+regions <- c("D", "J", "I", "C", "PC", "DC")
+
+# Loop over each region, relevel, fit the model, and store the results
+for (region in regions) {
+  # Subset the data for the current region
+  chao_temp <- subset(chao, type == region)
+  
+  model <- lm(diversity ~ age,
+                   data = chao_temp)
+  
+  model_summary <- summary(model)
+  coef_matrix <- model_summary$coefficients
+  coef_df <- as.data.frame(coef_matrix)
+
+  
+  # Add a column to identify the reference region
+  coef_df$Reference <- region
+  
+  # Add a column to indicate significance based on p-value
+  coef_df$Significant <- ifelse(coef_df$`Pr(>|t|)` < 0.05, "Yes", "No")
+  
+  # Store the result in the list
+  a_diversity_chao_results_list[[region]] <- coef_df
+  
+  # Collect all p-values (excluding the intercept)
+  all_p_values <- c(all_p_values, coef_df$`Pr(>|t|)`[-1])
+}
+
+
+# Combine all the results into a single data frame
+chao_results_df <- do.call(rbind, a_diversity_chao_results_list)
+
+# Display the combined data frame with significance column
+chao_results_df
+
+# Create the summary table
+chao_summary_table <- chao_results_df %>%
+  filter(grepl("^[A-Z]+\\.age", rownames(.))) %>%  # Filter rows with type comparisons
+  mutate(
+    Comparison = paste0(Reference, "-age"),
+    Significant = ifelse(Significant == "Yes", "*", "")
+  ) %>%
+  select(Comparison, Estimate, `Pr(>|t|)`, Significant) %>%
+  arrange(Comparison)
+
+# Create a matrix of significance
+chao_sig_matrix <- chao_summary_table %>%
+  mutate(From = sub("-.*", "", Comparison),
+         To = sub(".*-", "", Comparison)) %>%
+  select(From, To, Significant) %>%
+  pivot_wider(names_from = To, values_from = Significant, values_fill = "") %>%
+  column_to_rownames("From")
+
+# Reorder matrix
+desired_order <- c("D", "J", "I", "C", "PC", "DC")
+chao_sig_matrix[desired_order,, drop = FALSE]
+
+# Print the results
+print(chao_summary_table)
+print(chao_sig_matrix)
+
+tiff(file.path(folder_path, "chao1_con_age.tiff"), units="in", width=4, height=4, res=300)
+plot(c_age_chao)
+dev.off()
+```  
+
+# Age - Shannon
+```{r}
+shannon <- meta(species_physeq.noEuk)
+shannon$diversity <- microbiome::alpha(species_physeq.noEuk, index = "all")$diversity_shannon 
+
+# Shannon - Linear regression for all regions
+# Plot
+c_age_shannon <- ggplot(shannon,
+       aes(x = age,
+           y = diversity)) +
+  geom_point() +
+  geom_smooth(method = "lm",
+              se = FALSE,
+              colour = "#77aadd") +
+  theme_light() +
+  theme(axis.text.x = element_text(angle = 0, size = 10), 
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background = element_rect(fill = "grey"),
+        strip.text = element_text(size = 12, face = "bold")) +
+  facet_grid("type") +
+  xlab("Age (Years)") + 
+  ylab("Shannon")
+
+# Linear regressions per sample site
+
+# Initialize an empty list to store results
+a_diversity_shannon_results_list <- list()
+
+# Initialize a list to store all p-values
+all_p_values <- c()
+
+# Define the regions for releveling
+regions <- c("D", "J", "I", "C", "PC", "DC")
+
+# Loop over each region, relevel, fit the model, and store the results
+for (region in regions) {
+  # Subset the data for the current region
+  shannon_temp <- subset(shannon, type == region)
+  
+  model <- lm(diversity ~ age,
+                   data = shannon_temp)
+  
+  model_summary <- summary(model)
+  coef_matrix <- model_summary$coefficients
+  coef_df <- as.data.frame(coef_matrix)
+
+  
+  # Add a column to identify the reference region
+  coef_df$Reference <- region
+  
+  # Add a column to indicate significance based on p-value
+  coef_df$Significant <- ifelse(coef_df$`Pr(>|t|)` < 0.05, "Yes", "No")
+  
+  # Store the result in the list
+  a_diversity_shannon_results_list[[region]] <- coef_df
+  
+  # Collect all p-values (excluding the intercept)
+  all_p_values <- c(all_p_values, coef_df$`Pr(>|t|)`[-1])
+}
+
+
+# Combine all the results into a single data frame
+shannon_results_df <- do.call(rbind, a_diversity_shannon_results_list)
+
+# Display the combined data frame with significance column
+shannon_results_df
+
+# Create the summary table
+shannon_summary_table <- shannon_results_df %>%
+  filter(grepl("^[A-Z]+\\.age", rownames(.))) %>%  # Filter rows with type comparisons
+  mutate(
+    Comparison = paste0(Reference, "-age"),
+    Significant = ifelse(Significant == "Yes", "*", "")
+  ) %>%
+  select(Comparison, Estimate, `Pr(>|t|)`, Significant) %>%
+  arrange(Comparison)
+
+# Create a matrix of significance
+shannon_sig_matrix <- shannon_summary_table %>%
+  mutate(From = sub("-.*", "", Comparison),
+         To = sub(".*-", "", Comparison)) %>%
+  select(From, To, Significant) %>%
+  pivot_wider(names_from = To, values_from = Significant, values_fill = "") %>%
+  column_to_rownames("From")
+
+# Reorder matrix
+desired_order <- c("D", "J", "I", "C", "PC", "DC")
+shannon_sig_matrix <- shannon_sig_matrix[desired_order,, drop = FALSE]
+
+# Print the results
+print(shannon_summary_table)
+print(shannon_sig_matrix)
+
+tiff(file.path(folder_path, "shannon_con_age.tiff"), units="in", width=4, height=4, res=300)
+plot(c_age_shannon)
+dev.off()
+```
+
+
+# Age - Inverse Simpson
+```{r}
+inverse_simpson <- meta(species_physeq.noEuk)
+inverse_simpson$diversity <- microbiome::alpha(species_physeq.noEuk, index = "all")$diversity_inverse_simpson
+
+# Inverse Simpson - Linear regression for all regions
+# Plot
+c_age_invsimpson <- ggplot(inverse_simpson,
+       aes(x = age,
+           y = diversity)) +
+  geom_point() +
+  geom_smooth(method = "lm",
+              se = FALSE,
+              colour = "#77aadd") +
+  theme_light() +
+  theme(axis.text.x = element_text(angle = 0, size = 10), 
+        axis.text.y = element_text(size = 10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background = element_rect(fill = "grey"),
+        strip.text = element_text(size = 12, face = "bold")) +
+  facet_grid("type") +
+  xlab("Age (Years)") + 
+  ylab("Inverse Simpson")
+
+# Linear regressions per sample site
+
+# Initialize an empty list to store results
+a_diversity_inverse_simpson_results_list <- list()
+
+# Initialize a list to store all p-values
+all_p_values <- c()
+
+# Define the regions for releveling
+regions <- c("D", "J", "I", "C", "PC", "DC")
+
+# Loop over each region, relevel, fit the model, and store the results
+for (region in regions) {
+  # Subset the data for the current region
+  inverse_simpson_temp <- subset(inverse_simpson, type == region)
+  
+  model <- lm(diversity ~ age,
+              data = inverse_simpson_temp)
+  
+  model_summary <- summary(model)
+  coef_matrix <- model_summary$coefficients
+  coef_df <- as.data.frame(coef_matrix)
+
+  
+  # Add a column to identify the reference region
+  coef_df$Reference <- region
+  
+  # Add a column to indicate significance based on p-value
+  coef_df$Significant <- ifelse(coef_df$`Pr(>|t|)` < 0.05, "Yes", "No")
+  
+  # Store the result in the list
+  a_diversity_inverse_simpson_results_list[[region]] <- coef_df
+  
+  # Collect all p-values (excluding the intercept)
+  all_p_values <- c(all_p_values, coef_df$`Pr(>|t|)`[-1])
+}
+
+
+# Combine all the results into a single data frame
+inverse_simpson_results_df <- do.call(rbind, a_diversity_inverse_simpson_results_list)
+
+# Display the combined data frame with significance column
+inverse_simpson_results_df
+
+# Create the summary table
+inverse_simpson_summary_table <- inverse_simpson_results_df %>%
+  filter(grepl("^[A-Z]+\\.age", rownames(.))) %>%  # Filter rows with type comparisons
+  mutate(
+    Comparison = paste0(Reference, "-age"),
+    Significant = ifelse(Significant == "Yes", "*", "")
+  ) %>%
+  select(Comparison, Estimate, `Pr(>|t|)`, Significant) %>%
+  arrange(Comparison)
+
+# Create a matrix of significance
+inverse_simpson_sig_matrix <- inverse_simpson_summary_table %>%
+  mutate(From = sub("-.*", "", Comparison),
+         To = sub(".*-", "", Comparison)) %>%
+  select(From, To, Significant) %>%
+  pivot_wider(names_from = To, values_from = Significant, values_fill = "") %>%
+  column_to_rownames("From")
+
+# Reorder matrix
+desired_order <- c("D", "J", "I", "C", "PC", "DC")
+inverse_simpson_sig_matrix <- inverse_simpson_sig_matrix[desired_order,, drop = FALSE]
+
+# Print the results
+print(inverse_simpson_summary_table)
+print(inverse_simpson_sig_matrix)
+
+
+tiff(file.path(folder_path, "invSimpson_con_age.tiff"), units="in", width=4, height=4, res=300)
+plot(c_age_invsimpson)
+dev.off()
+```
+
+Note: any lines of code that contained file paths (i.e. for export of .csv files) have been removed in the interests of security.

@@ -1,0 +1,535 @@
+---
+title: "CreatePhyloSeqObjects"
+author: "Catherine Purse"
+date: "2024-10-15"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+* Load libraries
+```{r}
+library(phyloseq)
+library(tidyverse)
+library(microbiome)
+library(microViz)
+```
+
+* Function to create Phyloseq object from Metaphlan profile (https://rdrr.io/github/g-antonello/gautils2/src/R/metaphlan_to_phyloseq.R)
+```{r}
+metaphlan_to_phyloseq <- function(mpa,
+                                  metadata = NULL,
+                                  version = 4,
+                                  verbose = TRUE,
+                                  tax_lvl = "Species"){
+
+
+  if(version == 4){
+    if(is.character(mpa)){
+      # load raw metaphlan data
+      mpa <- data.table::fread(mpa) %>%
+        as.data.frame()
+    }
+  }
+    if(version == 3){
+      if(is.character(mpa)){
+        # load raw metaphlan data
+        mpa <- data.table::fread(mpa,skip = 1) %>%
+          as.data.frame()
+      }
+    }
+  # find for each row, to which depth of taxonomy it arrives (as integers)
+  tax_lengths <- mpa$clade_name %>%
+    strsplit("|", fixed = T) %>%
+    sapply(length)
+  # remove first element,we want to keep it
+  tax_lengths <- tax_lengths[-1]
+  # get integer equivalent of the taxonomic level we want
+  tax_lvl_int <- match(tax_lvl, c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species", "SGB"))
+  # subset the otu table, so to keep only UNASSIGNED on top and the rows exactly to te taxonomic level
+  otu_cleaned <- mpa[c(T, tax_lengths == tax_lvl_int), 2:ncol(mpa)]
+
+  if(!is.null(metadata)){
+    inters_names <- intersect(colnames(otu_cleaned), rownames(metadata))
+    if(verbose){
+      if(length(colnames(otu_cleaned)[!(colnames(otu_cleaned) %in% inters_names)])!= 0){
+        cat("Metaphlan table samples lost: ")
+        cat(colnames(otu_cleaned)[!(colnames(otu_cleaned) %in% inters_names)], sep = " ")
+        cat("\n")
+        cat("\n")
+      }
+
+      if(length(rownames(metadata)[!(rownames(metadata) %in% inters_names)]) != 0){
+        cat("Metadata table samples lost: ")
+        cat(rownames(metadata)[!(rownames(metadata) %in% inters_names)], sep = " ")
+        cat("\n")
+        cat("\n")
+      }
+    }
+
+    otu_cleaned <- otu_cleaned[, inters_names]
+    metadata_cleaned <- metadata[match(inters_names, rownames(metadata)),]
+
+  }
+
+  # create taxonomy table, filling empty columns with NA
+
+  taxonomy_tab <- mpa[c(T, tax_lengths == tax_lvl_int), 1] %>%
+    as.data.frame() %>%
+    set_names("clade_name") %>%
+    separate(col="clade_name", into = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species", "SGB")[1:tax_lvl_int],sep = "\\|", fill = "right") %>%
+    as.matrix()
+  # rename the UNKNOWN clade as all unknown, otherwise we can't assign rownames
+  taxonomy_tab[1,] <- rep("UNKNOWN",tax_lvl_int)
+
+  #assign rownames to the tax level chosen
+  rownames(taxonomy_tab) <- paste0("otu", seq_len(nrow(otu_cleaned)))
+  rownames(otu_cleaned) <- rownames(taxonomy_tab)
+  
+
+
+    profiles <- phyloseq(otu_table(as.matrix(otu_cleaned), taxa_are_rows = TRUE),
+                         tax_table(taxonomy_tab),
+                         sample_data(metadata_cleaned, errorIfNULL = FALSE)
+    )
+
+    return(profiles)
+}
+```
+
+
+* Load data
+```{r}
+#load metadata and reassign column 1 as rownames
+metadata <- read_csv("Metadata_6189_Oct24.csv") %>% 
+  remove_rownames %>% 
+  column_to_rownames(var =  "sample")
+
+mpa_withunknown <- read_tsv("6189_merged_ab.txt", skip=1)
+```
+
+## Colour palette
+```{r}
+cb_palette <- c("#ee8866", "#77aadd","#d3d3d3","#FDF28E","#8ED29B","#bbccee", "#AFC30A","#cc99cc","#C1E49C","#dd7788", "#009E73")
+```
+
+## Kingdom level
+
+* Parse metaphlan data into phyloseq object
+```{r}
+kingdom_physeq <- metaphlan_to_phyloseq(
+  mpa_withunknown,
+  metadata = metadata,
+  version = 4,
+  verbose = TRUE,
+  tax_lvl = "Kingdom"
+)
+```
+
+```{r}
+kingdom_physeq <- kingdom_physeq %>% tax_fix()
+```
+
+* Remove the leading characters (e.g. p__)
+```{r}
+# view part of the tax table
+phyloseq::tax_table(kingdom_physeq)
+
+# replace _[A-Z] with ""
+tax_table(kingdom_physeq)[, colnames(tax_table(kingdom_physeq))] <- gsub(tax_table(kingdom_physeq)[, colnames(tax_table(kingdom_physeq))],     pattern = "[a-z]__", replacement = "")
+
+# check tax_table again
+phyloseq::tax_table(kingdom_physeq)
+```
+
+* Remove unneeded samples
+```{r}
+# Filter kingdom level phyloseq object to remove Eukaryotes
+kingdom_physeq <- subset_taxa(kingdom_physeq, Kingdom!="Eukaryota")
+
+# Prune "empty" samples
+kingdom_physeq <- prune_samples(sample_sums(kingdom_physeq) > 0, kingdom_physeq)
+
+# Remove faecal samples
+kingdom_physeq <- ps_filter(kingdom_physeq, type != "Faecal")
+```
+
+* Test plot
+```{r}
+plot_bar(kingdom_physeq, fill="Kingdom")
+```
+
+* Identify number of samples containing archaea
+```{r}
+# Identify taxa that are classified as archaea
+archaea_taxa <- taxa_names(subset_taxa(kingdom_physeq, Kingdom == "Archaea"))
+
+# Subset the phyloseq object to include only archaea
+archaea_physeq <- prune_taxa(archaea_taxa, kingdom_physeq)
+
+# Check which samples have non-zero abundance for archaea
+archaea_present_samples <- sample_sums(archaea_physeq) > 0
+
+# Count the number of samples with archaea
+num_samples_with_archaea <- sum(archaea_present_samples)
+
+# Output the result
+cat("Number of samples with archaea:", num_samples_with_archaea, "\n")
+```
+
+* Export phyloseq object for use in other scripts
+```{r}
+saveRDS(kingdom_physeq, file = "kingdom_phyloseq.rds")
+```
+
+
+## Phylum level
+
+* Parse metaphlan data into phyloseq object
+```{r}
+phylum_physeq <- metaphlan_to_phyloseq(
+  mpa_withunknown,
+  metadata = metadata,
+  version = 4,
+  verbose = TRUE,
+  tax_lvl = "Phylum"
+)
+```
+
+* Fill in any empty cells using microviz function
+```{r}
+phylum_physeq <- phylum_physeq %>% tax_fix()
+```
+
+* Remove the leading characters (e.g. p__)
+```{r}
+# view part of the tax table
+phyloseq::tax_table(phylum_physeq)
+
+# replace _[A-Z] with ""
+tax_table(phylum_physeq)[, colnames(tax_table(phylum_physeq))] <- gsub(tax_table(phylum_physeq)[, colnames(tax_table(phylum_physeq))],     pattern = "[a-z]__", replacement = "")
+
+# check tax_table again
+phyloseq::tax_table(phylum_physeq)
+```
+
+* Remove empty/unneeded samples
+```{r}
+# Filter phylum level phyloseq object to remove Eukaryotes
+phylum_physeq <- subset_taxa(phylum_physeq, Phylum!="Eukaryota")
+
+# prune "empty" samples
+phylum_physeq <- prune_samples(sample_sums(phylum_physeq) > 0, phylum_physeq)
+
+# Remove faecal samples
+phylum_physeq <- ps_filter(phylum_physeq, type != "Faecal")
+```
+
+* Test plot (top 10)
+Specifying 2:11 omits the unclassified faction from the plot, which has the highest abundance at all taxonomic levels
+```{r}
+TopNOTUs.Phy <- names(sort(taxa_sums(phylum_physeq), TRUE)[2:11])
+phy10   <- prune_taxa(TopNOTUs.Phy, phylum_physeq)
+plot_bar(phy10, fill="Phylum")
+```
+
+* Export phyloseq object for use in other scripts
+```{r}
+saveRDS(phylum_physeq, file = "phylum_phyloseq.rds")
+```
+
+
+## Class level
+
+* Parse metaphlan data into phyloseq object
+```{r}
+class_physeq <- metaphlan_to_phyloseq(
+  mpa_withunknown,
+  metadata = metadata,
+  version = 4,
+  verbose = TRUE,
+  tax_lvl = "Class"
+)
+```
+
+* Fill in any empty cells using microviz function
+```{r}
+class_physeq <- class_physeq %>% tax_fix()
+```
+
+* Remove the leading characters (e.g. p__)
+```{r}
+# view part of the tax table
+phyloseq::tax_table(class_physeq)
+
+# replace _[A-Z] with ""
+tax_table(class_physeq)[, colnames(tax_table(class_physeq))] <- gsub(tax_table(class_physeq)[, colnames(tax_table(class_physeq))],     pattern = "[a-z]__", replacement = "")
+
+# check tax_table again
+phyloseq::tax_table(class_physeq)
+```
+
+* Remove empty/unneeded samples
+```{r}
+# Filter class level phyloseq object to remove Eukaryotes
+class_physeq <- subset_taxa(class_physeq, Class!="Eukaryota")
+
+# prune "empty" samples
+class_physeq <- prune_samples(sample_sums(class_physeq) > 0, class_physeq)
+
+# Remove faecal samples
+class_physeq <- ps_filter(class_physeq, type != "Faecal")
+```
+
+* Test plot (top 10)
+```{r}
+TopNOTUs.Cls <- names(sort(taxa_sums(class_physeq), TRUE)[2:11])
+cls10   <- prune_taxa(TopNOTUs.Cls, class_physeq)
+plot_bar(cls10, fill="Class")
+```
+
+* Export phyloseq object for use in other scripts
+```{r}
+saveRDS(class_physeq, file = "class_phyloseq.rds")
+```
+
+## Order level
+
+* Parse metaphlan data into phyloseq object
+```{r}
+order_physeq <- metaphlan_to_phyloseq(
+  mpa_withunknown,
+  metadata = metadata,
+  version = 4,
+  verbose = TRUE,
+  tax_lvl = "Order"
+)
+```
+
+* Fill in any empty cells using microviz function
+```{r}
+order_physeq <- order_physeq %>% tax_fix()
+```
+
+* Remove the leading characters (e.g. p__)
+```{r}
+# view part of the tax table
+phyloseq::tax_table(order_physeq)
+
+# replace _[A-Z] with ""
+tax_table(order_physeq)[, colnames(tax_table(order_physeq))] <- gsub(tax_table(order_physeq)[, colnames(tax_table(order_physeq))],     pattern = "[a-z]__", replacement = "")
+
+# check tax_table again
+phyloseq::tax_table(order_physeq)
+```
+
+* Remove empty/unneeded samples
+```{r}
+# Filter order level phyloseq object to remove Eukaryotes
+order_physeq <- subset_taxa(order_physeq, Order!="Eukaryota")
+
+# prune "empty" samples
+order_physeq <- prune_samples(sample_sums(order_physeq) > 0, order_physeq)
+
+# Remove faecal samples
+order_physeq <- ps_filter(order_physeq, type != "Faecal")
+```
+
+* Test plot (top 10)
+```{r}
+TopNOTUs.Ord <- names(sort(taxa_sums(order_physeq), TRUE)[2:11])
+ord10   <- prune_taxa(TopNOTUs.Ord, order_physeq)
+plot_bar(ord10, fill="Order")
+```
+
+* Export phyloseq object for use in other scripts
+```{r}
+saveRDS(order_physeq, file = "order_phyloseq.rds")
+```
+
+
+## Family
+
+* Parse metaphlan data into phyloseq object
+```{r}
+family_physeq <- metaphlan_to_phyloseq(
+  mpa_withunknown,
+  metadata = metadata,
+  version = 4,
+  verbose = TRUE,
+  tax_lvl = "Family"
+)
+```
+
+* Fill in any empty cells using microviz function
+```{r}
+family_physeq <- family_physeq %>% tax_fix()
+```
+
+* Remove the leading characters (e.g. p__)
+```{r}
+# view part of the tax table
+phyloseq::tax_table(family_physeq)
+
+# replace _[A-Z] with ""
+tax_table(family_physeq)[, colnames(tax_table(family_physeq))] <- gsub(tax_table(family_physeq)[, colnames(tax_table(family_physeq))],     pattern = "[a-z]__", replacement = "")
+
+# check tax_table again
+phyloseq::tax_table(family_physeq)
+```
+
+* Remove empty/unneeded samples
+```{r}
+# Filter family level phyloseq object to remove Eukaryotes
+family_physeq <- subset_taxa(family_physeq, Family!="Eukaryota")
+
+# prune "empty" samples
+family_physeq <- prune_samples(sample_sums(family_physeq) > 0, family_physeq)
+
+# Remove faecal samples
+family_physeq <- ps_filter(family_physeq, type != "Faecal")
+```
+
+* Test plot (top 10)
+```{r}
+TopNOTUs.Fam <- names(sort(taxa_sums(family_physeq), TRUE)[2:11])
+fam10   <- prune_taxa(TopNOTUs.Fam, family_physeq)
+plot_bar(fam10, fill="Family")
+```
+
+* Export phyloseq object for use in other scripts
+```{r}
+saveRDS(family_physeq, file = "family_phyloseq.rds")
+```
+
+
+## Genus
+
+* Parse metaphlan data into phyloseq object
+```{r}
+genus_physeq <- metaphlan_to_phyloseq(
+  mpa_withunknown,
+  metadata = metadata,
+  version = 4,
+  verbose = TRUE,
+  tax_lvl = "Genus"
+)
+```
+
+* Fill in any empty cells using microviz function
+```{r}
+genus_physeq <- genus_physeq %>% tax_fix()
+```
+
+* Remove the leading characters (e.g. p__)
+```{r}
+# view part of the tax table
+phyloseq::tax_table(genus_physeq)
+
+# replace _[A-Z] with ""
+tax_table(genus_physeq)[, colnames(tax_table(genus_physeq))] <- gsub(tax_table(genus_physeq)[, colnames(tax_table(genus_physeq))],     pattern = "[a-z]__", replacement = "")
+
+# check tax_table again
+phyloseq::tax_table(genus_physeq)
+```
+
+* Remove empty/unneeded samples
+```{r}
+# Filter genus level phyloseq object to remove Eukaryotes
+genus_physeq <- subset_taxa(genus_physeq, Genus!="Eukaryota")
+
+# prune "empty" samples
+genus_physeq <- prune_samples(sample_sums(genus_physeq) > 0, genus_physeq)
+
+# Remove faecal samples
+genus_physeq <- ps_filter(genus_physeq, type != "Faecal")
+```
+
+* Test plot (top 10)
+```{r}
+TopNOTUs.Gen <- names(sort(taxa_sums(genus_physeq), TRUE)[2:11])
+gen10   <- prune_taxa(TopNOTUs.Gen, genus_physeq)
+plot_bar(gen10, fill="Genus")
+```
+
+* Export phyloseq object for use in other scripts
+```{r}
+saveRDS(genus_physeq, file = "genus_phyloseq.rds")
+```
+
+* Identify number of samples containing Segatella
+```{r}
+# Identify taxa that are classified as Segatella
+seg_taxa <- taxa_names(subset_taxa(genus_physeq, Genus == "Segatella"))
+
+# Subset the phyloseq object to include only Segatella
+seg_physeq <- prune_taxa(seg_taxa, genus_physeq)
+
+# Check which samples have non-zero abundance for Segatella
+seg_present_samples <- sample_sums(seg_physeq) > 0
+
+# Count the number of samples with Segatella
+num_samples_with_seg <- sum(seg_present_samples)
+
+# Output the result
+cat("Number of samples with segatella:", num_samples_with_seg, "\n")
+```
+
+
+## Species
+
+* Parse metaphlan data into phyloseq object
+```{r}
+species_physeq <- metaphlan_to_phyloseq(
+  mpa_withunknown,
+  metadata = metadata,
+  version = 4,
+  verbose = TRUE,
+  tax_lvl = "Species"
+)
+```
+
+* Fill in any empty cells using microviz function
+```{r}
+species_physeq <- species_physeq %>% tax_fix()
+```
+
+* Remove the leading characters (e.g. p__)
+```{r}
+# view part of the tax table
+phyloseq::tax_table(species_physeq)
+
+# replace _[A-Z] with ""
+tax_table(species_physeq)[, colnames(tax_table(species_physeq))] <- gsub(tax_table(species_physeq)[, colnames(tax_table(species_physeq))],     pattern = "[a-z]__", replacement = "")
+
+# check tax_table again
+phyloseq::tax_table(species_physeq)
+```
+
+* Remove empty/unneeded samples
+```{r}
+# Filter species level phyloseq object to remove Eukaryotes
+species_physeq <- subset_taxa(species_physeq, Species!="Eukaryota")
+
+# prune "empty" samples
+species_physeq <- prune_samples(sample_sums(species_physeq) > 0, species_physeq)
+
+# Remove faecal samples
+species_physeq <- ps_filter(species_physeq, type != "Faecal")
+```
+
+* Test plot (top 10)
+```{r}
+TopNOTUs.Spe <- names(sort(taxa_sums(species_physeq), TRUE)[2:11])
+spe10   <- prune_taxa(TopNOTUs.Spe, species_physeq)
+plot_bar(spe10, fill="Species")
+```
+
+* Export phyloseq object for use in other scripts
+```{r}
+saveRDS(species_physeq, file = "species_phyloseq.rds")
+```

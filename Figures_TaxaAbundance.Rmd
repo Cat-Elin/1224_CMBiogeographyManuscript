@@ -1,0 +1,840 @@
+---
+title: "Taxa Abundance Figures"
+author: "Catherine Purse"
+date: "2024-11-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This R Markdown file contains the code needed to create figures for visualising the abundance of taxa for the manuscript 'Biogeography but not age affects the captive-bred cynomolgus macaque intestinal microbiome.'. It has the code to explore the top 10 most abundant taxa for both the bacterial and archaeal fractions of the intestinal microbiome. 
+
+
+* Load libraries
+```{r}
+library(phyloseq)
+library(tidyverse)
+library(microbiome)
+library(microViz)
+library(patchwork)
+library(MicEco)
+```
+
+* Colour palette
+```{r}
+cb_palette <- c("#ee8866", "#77aadd","#d3d3d3","#FDF28E","#8ED29B","#bbccee", "#AFC30A","#cc99cc","#C1E49C","#dd7788", "#009E73")
+```
+
+# Kingdom
+
+* Load RDS file
+```{r}
+king <- readRDS("kingdom_phyloseq.rds")
+```
+
+## Faceted bar chart - Kingdom
+```{r}
+# melt into df
+king.df <- psmelt(king)
+
+# remove underscores between words in Phylum column
+king.df$Kingdom <- gsub("_", " ", king.df$Kingdom)
+
+# make region a factor in the df (i.e. change order of facets in next step)
+king.df$type <- factor(king.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "J", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+king.df <- king.df[order(king.df$age, king.df$age_label), ]
+king.df$age_label <- factor(king.df$age_label, levels = unique(king.df$age_label))
+
+
+# plot
+king_plot <- ggplot(king.df, aes(x = age_label, y = Abundance, fill = Kingdom)) +
+  theme_light() +
+  geom_col() +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=7, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=9),
+        legend.title = element_text(size=12),
+        legend.position = "right") +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+king_plot
+```
+
+
+# Phyla
+
+* Read RDS file
+```{r}
+phylum <- readRDS("phylum_phyloseq.rds")
+```
+
+* Filter for top 10 (excluding 'unclassified')
+```{r}
+TopNOTUs.Phy <- names(sort(taxa_sums(phylum), TRUE)[2:11])
+phy10   <- prune_taxa(TopNOTUs.Phy, phylum)
+```
+
+## Faceted bar chart - Phyla
+```{r}
+# melt into df
+phy10.df <- psmelt(phy10)
+
+# remove underscores between words in Phylum column
+phy10.df$Phylum <- gsub("_", " ", phy10.df$Phylum)
+
+# make region a factor in the df (i.e. change order of facets in next step)
+phy10.df$type <- factor(phy10.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "Jejunum", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+phy10.df <- phy10.df[order(phy10.df$age, phy10.df$age_label), ]
+phy10.df$age_label <- factor(phy10.df$age_label, levels = unique(phy10.df$age_label))
+
+# plot
+phy_plot <- ggplot(phy10.df, aes(x = age_label, y = Abundance, fill = Phylum)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Phylum") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=9, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=10),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+phy_plot
+```
+
+
+# Class
+
+* Read RDS file
+```{r}
+class <- readRDS("class_phyloseq.rds")
+```
+
+* Filter for top 10 (excluding 'unclassified')
+```{r}
+TopNOTUs.Class <- names(sort(taxa_sums(class), TRUE)[2:11])
+class10   <- prune_taxa(TopNOTUs.Class, class)
+```
+
+* Faceted bar chart - Class
+```{r}
+# melt into df
+class10.df <- psmelt(class10)
+
+# remove underscores between words in Class column
+class10.df$Class <- gsub("_", " ", class10.df$Class)
+
+# make region a factor in the df (i.e. change order of facets in next step)
+class10.df$type <- factor(class10.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "Jejunum", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+class10.df <- class10.df[order(class10.df$age, class10.df$age_label), ]
+class10.df$age_label <- factor(class10.df$age_label, levels = unique(class10.df$age_label))
+
+# plot
+class_plot <- ggplot(class10.df, aes(x = id, y = Abundance, fill = Class)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Class") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=10, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=10),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+   scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+class_plot
+```
+
+# Order
+
+* Read RDS file
+```{r}
+order <- readRDS("order_phyloseq.rds")
+```
+
+* Filter for top 10 (excluding 'unclassified')
+```{r}
+TopNOTUs.Order <- names(sort(taxa_sums(order), TRUE)[2:11])
+order10   <- prune_taxa(TopNOTUs.Order, order)
+```
+
+## Order Rel. Abundance
+
+```{r}
+# melt into df
+order10.df <- psmelt(order10)
+
+# remove underscores between words in Order column
+order10.df$Order <- gsub("_", " ", order10.df$Order)
+
+# make region a factor in the df (i.e. change order of facets in next step)
+order10.df$type <- factor(order10.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "Jejunum", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+order10.df <- order10.df[order(order10.df$age, order10.df$age_label), ]
+order10.df$age_label <- factor(order10.df$age_label, levels = unique(order10.df$age_label))
+
+# plot
+order_plot <- ggplot(order10.df, aes(x = id, y = Abundance, fill = Order)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Order") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=10, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=10),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+order_plot
+```
+
+
+# Family
+
+* Read RDS file
+```{r}
+family <- readRDS("family_phyloseq.rds")
+```
+
+* Filter for top 10 taxa (excluding 'unclassified')
+```{r}
+TopNOTUs.Family <- names(sort(taxa_sums(family), TRUE)[2:11])
+family10   <- prune_taxa(TopNOTUs.Family, family)
+```
+
+## Family Rel. Abundance
+```{r}
+# melt into df
+family10.df <- psmelt(family10)
+
+# remove underscores between words in Family column
+family10.df$Family <- gsub("_", " ", family10.df$Family)
+
+# make region a factor in the df (i.e. change order of facets in next step)
+family10.df$type <- factor(family10.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "Jejunum", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+family10.df <- family10.df[order(family10.df$age, family10.df$age_label), ]
+family10.df$age_label <- factor(family10.df$age_label, levels = unique(family10.df$age_label))
+
+
+# plot
+family_plot <- ggplot(family10.df, aes(x = id, y = Abundance, fill = Family)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Family") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=10, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=9),
+        legend.title = element_text(size=11),
+        legend.position = "bottom") +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+family_plot
+```
+
+# Genus
+
+* Read RDS file
+```{r}
+genus <- readRDS("genus_phyloseq.rds")
+```
+
+* Filter for top 10 taxa (excluding 'unclassified')
+```{r}
+TopNOTUs.Genus <- names(sort(taxa_sums(genus), TRUE)[2:11])
+genus10   <- prune_taxa(TopNOTUs.Genus, genus)
+```
+
+## Genus Rel. Abundance
+```{r}
+# melt into df
+genus10.df <- psmelt(genus10)
+
+# remove underscores between words in Genus column
+genus10.df$Genus <- gsub("_", " ", genus10.df$Genus)
+
+# make region a factor in the df (i.e. change order of facets in next step)
+genus10.df$type <- factor(genus10.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "J", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+genus10.df <- genus10.df[order(genus10.df$age, genus10.df$age_label), ]
+genus10.df$age_label <- factor(genus10.df$age_label, levels = unique(genus10.df$age_label))
+
+# plot
+genus_plot <- ggplot(genus10.df, aes(x = age_label, y = Abundance, fill = Genus)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Genus") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=9, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=10),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+    scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+genus_plot
+```
+
+
+# Species
+
+* Read RDS file
+```{r}
+species <- readRDS("species_phyloseq.rds")
+```
+
+* Filter for top 10 taxa (excluding 'unclassified')
+```{r}
+TopNOTUs.Species <- names(sort(taxa_sums(species), TRUE)[2:11])
+species10   <- prune_taxa(TopNOTUs.Species, species)
+```
+
+## Species Rel. Abundance
+```{r}
+# melt into df
+species10.df <- psmelt(species10)
+
+# remove underscores between words in Species column
+species10.df$Species <- gsub("_", " ", species10.df$Species)
+
+# make region a factor in the df (i.e. change order of facets in next step)
+species10.df$type <- factor(species10.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "J", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+species10.df <- species10.df[order(species10.df$age, species10.df$age_label), ]
+species10.df$age_label <- factor(species10.df$age_label, levels = unique(species10.df$age_label))
+
+# plot
+species_plot <- ggplot(species10.df, aes(x = age_label, y = Abundance, fill = Species)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Species") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=9, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=9),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+  guides(fill = guide_legend(nrow = 3)) +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+species_plot
+```
+
+
+# Segatella plot
+
+* Filter so only Segatella sp are included
+```{r}
+# Filter phylum level phyloseq object to retain only Segatella species
+species.seg <- subset_taxa(species, Genus=="Segatella")
+
+plot_bar(species.seg, fill="Species")
+
+#Remove "empty" samples (<0.1% relative abundance)
+species.seg <- prune_samples(sample_sums(species.seg) > 0.1, species.seg)
+```
+
+```{r}
+# melt into df
+species.seg.df <- psmelt(species.seg)
+
+# Filter taxa which have an overall lower relative abundance than 0.1%
+species.seg.df <- filter(species.seg.df, Abundance > 0.1)
+
+# remove underscores between words in Species column
+species.seg.df$Species <- gsub("_", " ", species.seg.df$Species)
+
+# make region a factor in the df (i.e. change order of facets in next step)
+species.seg.df$type <- factor(species.seg.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "J", I = "I", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+species.seg.df <- species.seg.df[order(species.seg.df$age, species.seg.df$age_label), ]
+species.seg.df$age_label <- factor(species.seg.df$age_label, levels = unique(species.seg.df$age_label))
+
+# Order the 'Species' factor levels so that UNKNOWN is last
+species.seg.df$Species <- factor(species.seg.df$Species, levels = c(sort(unique(species.seg.df$Species[species.seg.df$Species != 'UNKNOWN'])), 'UNKNOWN'))
+
+# find number of unique species
+unique_counts_seg <- sapply(species.seg.df, n_distinct)
+unique_counts_seg
+
+# plot
+seg.species_plot <- ggplot(species.seg.df, aes(x = age_label, y = Abundance, fill = Species)) +
+  theme_light() +
+  geom_col() +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=7, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 10, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=9),
+        legend.title = element_text(size=12),
+        legend.position = "right") +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+seg.species_plot
+```
+
+
+# Export Plots - Bacteria
+
+* Save as 300 dpi tiff
+```{r}
+tiff(file.path(folder_path_plots, "Kingdom_RelAb_290724.tiff"), units="in", width=8.5, height=4, res=300)
+plot(king_plot)
+dev.off()
+```
+
+* Phylum/Genus/Species Patchwork
+```{r}
+Bact_Tax <- phy_plot / genus_plot / species_plot + plot_layout(heights = c(10, 10, 10)) +
+  plot_annotation(tag_levels = 'A')
+Bact_Tax
+```
+
+* Export Plot
+```{r}
+tiff(file.path(folder_path_plots, "Bacteria_Top10Taxa.tiff"), units="in", width=9, height=12, res=300)
+plot(Bact_Tax)
+dev.off()
+```
+
+* Export Segatella Plot
+```{r}
+tiff(file.path(folder_path_plots, "Segatella_TopTaxa.tiff"), units="in", width=8.5, height=4, res=300)
+plot(seg.species_plot)
+dev.off()
+```
+
+
+# Archaea
+
+## Phylum
+
+```{r}
+# Filter phylum level phyloseq object to keep Archaea only
+phy.arch <- subset_taxa(phylum, Kingdom=="Archaea")
+
+# prune "empty" samples (0.01%)
+phy.arch <- prune_samples(sample_sums(phy.arch) > 0.01, phy.arch)
+```
+
+## Faceted bar chart - Phyla
+```{r}
+# melt into df
+phy.arch.df <- psmelt(phy.arch)
+
+# remove underscores between words in Phylum column
+phy.arch.df$Phylum <- gsub("_", " ", phy.arch.df$Phylum)
+
+# make region a factor in the df (i.e. change order of facets in next step)
+phy.arch.df$type <- factor(phy.arch.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "Jejunum", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+phy.arch.df <- phy.arch.df[order(phy.arch.df$age, phy.arch.df$age_label), ]
+phy.arch.df$age_label <- factor(phy.arch.df$age_label, levels = unique(phy.arch.df$age_label))
+
+# plot
+phy_plot.arch <- ggplot(phy.arch.df, aes(x = age_label, y = Abundance, fill = Phylum)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Phylum") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=9, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=10),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+phy_plot.arch
+```
+
+
+# Class
+```{r}
+# Filter class level phyloseq object to keep Archaea only
+class.arch <- subset_taxa(class, Kingdom=="Archaea")
+
+# prune "empty" samples (0.01%)
+class.arch <- prune_samples(sample_sums(class.arch) > 0.01, class.arch)
+```
+
+## Faceted Bar Chart - Class
+```{r}
+# Melt into df
+class.arch.df <- psmelt(class.arch)
+
+# Remove underscores between words in Class column
+class.arch.df$Class <- gsub("_", " ", class.arch.df$Class)
+
+# Make region a factor in the df (i.e. change order of facets in next step)
+class.arch.df$type <- factor(class.arch.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "Jejunum", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+class.arch.df <- class.arch.df[order(class.arch.df$age, class.arch.df$age_label), ]
+class.arch.df$age_label <- factor(class.arch.df$age_label, levels = unique(class.arch.df$age_label))
+
+# Plot
+class_plot.arch <- ggplot(class.arch.df, aes(x = age_label, y = Abundance, fill = Class)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Class") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=9, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=10),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+class_plot.arch
+```
+
+
+# Order
+```{r}
+# Filter order level phyloseq object to keep Archaea only
+order.arch <- subset_taxa(order, Kingdom=="Archaea")
+
+# Prune "empty" samples (0.01%)
+order.arch <- prune_samples(sample_sums(order.arch) > 0.01, order.arch)
+```
+
+## Faceted Bar Chart - Order
+```{r}
+# Melt into df
+order.arch.df <- psmelt(order.arch)
+
+# Remove underscores between words in Order column
+order.arch.df$Order <- gsub("_", " ", order.arch.df$Order)
+
+# Make region a factor in the df (i.e. change order of facets in next step)
+order.arch.df$type <- factor(order.arch.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "J", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+order.arch.df <- order.arch.df[order(order.arch.df$age, order.arch.df$age_label), ]
+order.arch.df$age_label <- factor(order.arch.df$age_label, levels = unique(order.arch.df$age_label))
+
+# Plot
+order_plot.arch <- ggplot(order.arch.df, aes(x = age_label, y = Abundance, fill = Order)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Order") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=9, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=10),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+order_plot.arch
+```
+
+# Family 
+
+```{r}
+# Filter family level phyloseq object to keep Archaea only
+family.arch <- subset_taxa(family, Kingdom=="Archaea")
+
+# Prune "empty" samples (0.01%)
+family.arch <- prune_samples(sample_sums(family.arch) > 0.01, family.arch)
+```
+
+## Faceted Bar Chart - Family
+```{r}
+# Melt into df
+family.arch.df <- psmelt(family.arch)
+
+# Remove underscores between words in Family column
+family.arch.df$Family <- gsub("_", " ", family.arch.df$Family)
+
+# Make region a factor in the df (i.e. change order of facets in next step)
+family.arch.df$type <- factor(family.arch.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "J", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+family.arch.df <- family.arch.df[order(family.arch.df$age, family.arch.df$age_label), ]
+family.arch.df$age_label <- factor(family.arch.df$age_label, levels = unique(family.arch.df$age_label))
+
+# Plot
+family_plot.arch <- ggplot(family.arch.df, aes(x = age_label, y = Abundance, fill = Family)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Family") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=9, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=10),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+family_plot.arch
+```
+
+# Genus
+```{r}
+# Filter genus level phyloseq object to keep Archaea only
+gen.arch <- subset_taxa(genus, Kingdom=="Archaea")
+
+# prune "empty" samples (0.01%)
+gen.arch <- prune_samples(sample_sums(gen.arch) > 0.01, gen.arch)
+```
+
+## Faceted bar chart - Genus
+```{r}
+# Melt into df
+gen.arch.df <- psmelt(gen.arch)
+
+# Remove underscores between words in Genus column
+gen.arch.df$Genus <- gsub("_", " ", gen.arch.df$Genus)
+
+# Make region a factor in the df (i.e. change order of facets in next step)
+gen.arch.df$type <- factor(gen.arch.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "J", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+gen.arch.df <- gen.arch.df[order(gen.arch.df$age, gen.arch.df$age_label), ]
+gen.arch.df$age_label <- factor(gen.arch.df$age_label, levels = unique(gen.arch.df$age_label))
+
+# Plot
+gen_plot.arch <- ggplot(gen.arch.df, aes(x = age_label, y = Abundance, fill = Genus)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Genus") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=9, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=10),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+  scale_fill_manual(values = cb_palette) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+gen_plot.arch
+```
+
+
+# Species
+```{r}
+# Filter species level phyloseq object to keep Archaea only
+species.arch <- subset_taxa(species, Kingdom=="Archaea")
+
+# Prune "empty" samples (0.01%)
+species.arch <- prune_samples(sample_sums(species.arch) > 0.01, species.arch)
+```
+
+## Faceted Bar Chart - Species
+```{r}
+# Melt into df
+species.arch.df <- psmelt(species.arch)
+
+# Remove underscores between words in Species column
+species.arch.df$Species <- gsub("_", " ", species.arch.df$Species)
+
+# Make region a factor in the df (i.e. change order of facets in next step)
+species.arch.df$type <- factor(species.arch.df$type, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+# Label function
+labels <- c(D = "D", J = "J", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon")
+
+# Order ids by age (using a unique identifier to account for duplicates in df)
+species.arch.df <- species.arch.df[order(species.arch.df$age, species.arch.df$age_label), ]
+species.arch.df$age_label <- factor(species.arch.df$age_label, levels = unique(species.arch.df$age_label))
+
+# Plot
+species_plot.arch <- ggplot(species.arch.df, aes(x = age_label, y = Abundance, fill = Species)) +
+  theme_light() +
+  geom_col() +
+  ggtitle("Species") +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  theme(axis.text.x = element_text(angle=90, size=9, hjust=0.95, vjust=0.2), 
+        axis.text.y = element_text(size=10),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        axis.title = element_text(size = 12, color = "black"),
+        plot.title = element_text(face = "bold", size = 12),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face = "bold"),  # Adjust the size of facet labels
+        legend.text.align = 0, 
+        legend.text = element_text(size=10),
+        legend.title = element_text(size=12),
+        legend.position = "bottom") +
+  scale_fill_manual(values = cb_palette) +
+  guides(fill = guide_legend(nrow = 3)) +
+  xlab("Sample ID") + ylab("Relative Abundance (%)")
+species_plot.arch
+```
+
+# Export Plots - Archaea
+
+* Phylum/Genus/Species Patchwork
+```{r}
+Arch_Tax <- phy_plot.arch / gen_plot.arch / species_plot.arch + plot_layout(heights = c(10, 10, 10)) +
+  plot_annotation(tag_levels = 'A')
+Arch_Tax
+```
+
+* Export Plot
+```{r}
+tiff(file.path(folder_path_plots, "Archaea_Top10Taxa.tiff"), units="in", width=9, height=12, res=300)
+plot(Arch_Tax)
+dev.off()
+```

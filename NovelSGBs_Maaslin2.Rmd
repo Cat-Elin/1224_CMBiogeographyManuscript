@@ -1,0 +1,203 @@
+---
+title: "SGB_Maaslin2"
+author: "Catherine Purse"
+date: "2024-11-06"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+* Load libraries
+```{r}
+library(tidyverse)
+library(Maaslin2)
+```
+
+
+* Read RDS file (created in visualisation script)
+```{r}
+sgb <- readRDS("sgb_phyloseq.rds")
+```
+
+* Extract data from phyloseq project
+```{r}
+df_input_path <- data.frame(otu_table(sgb))
+
+df_input_metadata <- data.frame(sample_data(sgb))
+# Convert rownames to column
+df_input_metadata_cp <- tibble::rownames_to_column(df_input_metadata, "sample")
+```
+
+
+* D
+```{r}
+# Select D columns from metaphlan output file 
+D_path <- df_input_path %>% 
+  select(matches("_D_"))
+
+# Select D rows from metadata
+D_meta <- df_input_metadata_cp %>% 
+  filter(grepl('_D_', sample))
+
+# Turn 1st column of metadata into rownames
+rownames(D_meta) <- D_meta$sample
+D_meta <-subset(D_meta, select = -c(sample) )
+
+
+fit_data = Maaslin2(input_data     = D_path, 
+                    input_metadata = D_meta, 
+                    min_prevalence = 0.4,
+                    max_significance = 0.1,
+                    normalization  = "NONE",
+                    transform = "none",
+                    analysis_method = "LM",
+                    output         = "Maaslin2_SGBs_D_061124", 
+                    fixed_effects  = c("age"),
+                    correction = "BH"
+)
+```
+
+* J
+```{r}
+# Select J columns from metaphlan output file 
+J_path <- df_input_path %>% 
+  select(matches("_J_"))
+
+# Select J rows from metadata
+J_meta <- df_input_metadata_cp %>% 
+  filter(grepl('_J_', sample))
+
+# Turn 1st column of metadata into rownames
+rownames(J_meta) <- J_meta$sample
+J_meta <-subset(J_meta, select = -c(sample) )
+
+
+fit_data = Maaslin2(input_data     = J_path, 
+                    input_metadata = J_meta, 
+                    min_prevalence = 0.4,
+                    max_significance = 0.1,
+                    normalization  = "NONE",
+                    transform = "none",
+                    analysis_method = "LM",
+                    output         = "Maaslin2_SGBs_J_061124", 
+                    fixed_effects  = c("age"),
+                    correction = "BH"
+)
+```
+
+* I
+```{r}
+# Select I columns from metaphlan output file 
+I_path <- df_input_path %>% 
+  select(matches("_I_"))
+
+# Select I rows from metadata
+I_meta <- df_input_metadata_cp %>% 
+  filter(grepl('_I_', sample))
+
+# Turn 1st column of metadata into rownames
+rownames(I_meta) <- I_meta$sample
+I_meta <-subset(I_meta, select = -c(sample) )
+
+
+fit_data = Maaslin2(input_data     = I_path, 
+                    input_metadata = I_meta, 
+                    min_prevalence = 0.4,
+                    max_significance = 0.1,
+                    normalization  = "NONE",
+                    transform = "none",
+                    analysis_method = "LM",
+                    output         = "Maaslin2_SGBs_I_061124", 
+                    fixed_effects  = c("age"),
+                    correction = "BH"
+)
+```
+
+* C
+```{r}
+# Select C columns from metaphlan output file 
+C_path <- df_input_path %>% 
+  select(matches("_C_"))
+
+# Select C rows from metadata
+C_meta <- df_input_metadata_cp %>% 
+  filter(grepl('_C_', sample))
+
+# Turn 1st column of metadata into rownames
+rownames(C_meta) <- C_meta$sample
+C_meta <-subset(C_meta, select = -c(sample) )
+
+
+fit_data = Maaslin2(input_data     = C_path, 
+                    input_metadata = C_meta, 
+                    min_prevalence = 0.4,
+                    max_significance = 0.1,
+                    normalization  = "NONE",
+                    transform = "none",
+                    analysis_method = "LM",
+                    output         = "Maaslin2_SGBs_C_061124", 
+                    fixed_effects  = c("age"),
+                    correction = "BH"
+)
+```
+
+* PC
+```{r}
+# Select PC columns from metaphlan output file 
+PC_path <- df_input_path %>% 
+  select(matches("PC"))
+
+# Select PC rows from metadata
+PC_meta <- df_input_metadata_cp %>% 
+  filter(grepl('PC', sample))
+
+# Turn 1st column of metadata into rownames
+rownames(PC_meta) <- PC_meta$sample
+PC_meta <-subset(PC_meta, select = -c(sample) )
+
+
+fit_data = Maaslin2(input_data     = PC_path, 
+                    input_metadata = PC_meta, 
+                    min_prevalence = 0.4,
+                    max_significance = 0.1,
+                    #min_abundance = 0.0001,
+                    normalization  = "NONE",
+                    transform = "none",
+                    analysis_method = "LM",
+                    output         = "Maaslin2_SGBs_PC_061124", 
+                    fixed_effects  = c("age"),
+                    correction = "BH"
+)
+```
+
+* DC
+```{r}
+# Select DC columns from metaphlan output file 
+DC_path <- df_input_path %>% 
+  select(matches("DC"))
+
+# Select DC rows from metadata
+DC_meta <- df_input_metadata_cp %>% 
+  filter(grepl('DC', sample))
+
+# Turn 1st column of metadata into rownames
+rownames(DC_meta) <- DC_meta$sample
+DC_meta <-subset(DC_meta, select = -c(sample) )
+
+
+fit_data = Maaslin2(input_data     = DC_path, 
+                    input_metadata = DC_meta, 
+                    min_prevalence = 0.4,
+                    max_significance = 0.1,
+                    normalization  = "NONE",
+                    transform = "none",
+                    analysis_method = "LM",
+                    output         = "Maaslin2_SGBs_DC_061124", 
+                    fixed_effects  = c("age"),
+                    correction = "BH"
+)
+```

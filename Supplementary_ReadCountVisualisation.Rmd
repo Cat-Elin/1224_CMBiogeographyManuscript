@@ -1,0 +1,69 @@
+---
+title: "Read Count Visualisation"
+author: "Catherine Purse"
+date: "2024-11-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+* Load libraries
+```{r}
+library(tidyverse)
+library(ggbeeswarm)
+library(patchwork)
+```
+
+* Load files
+.csv file also includes read counts for 'singleread' files, so filtering zeros removes these
+```{r}
+all_reads <- read.csv("readcounts_filtered_all.csv")
+
+# Filter unwanted samples
+all_reads <- all_reads %>% 
+  filter(reads != 0) %>% 
+  filter(region != "Faecal")
+```
+
+* Beeswarm
+```{r}
+bee <- ggplot(all_reads, aes(x = "All samples", y = reads)) +
+  geom_beeswarm() +
+  theme_classic() +
+  ggtitle("Beeswarm of per sample read numbers")
+```
+
+* Histogram
+```{r}
+hist <- ggplot(all_reads, aes(x=reads)) + 
+  geom_histogram()+
+  theme_classic() +
+  ggtitle("Histogram of per sample read numbers")
+```
+
+* Scatter
+```{r}
+all_reads$region <- factor(all_reads$region, levels=c("D", "J", "I", "C", "PC", "DC"))
+
+scat <- ggplot(all_reads, aes(x = seq_along(sample), y = reads, colour = region)) + 
+  geom_point() +
+  theme_classic() +
+  ggtitle("Scatter plot of per sample read numbers") +
+  scale_x_continuous(name = "Sample Count", breaks = seq(0, nrow(reads_over1M), by = 10))
+```
+
+* Patchwork
+```{r}
+read_pw <- bee / hist / scat + plot_layout(heights = c(10, 10, 10)) +
+  plot_annotation(tag_levels = 'A')
+read_pw
+```
+
+* Export Plot
+```{r}
+tiff(file.path(folder_path_plots, "ReadCounts.tiff"), units="in", width=5, height=11, res=300)
+plot(read_pw)
+dev.off()
+```

@@ -1,0 +1,352 @@
+---
+title: "Novel SGB Visualisation"
+author: "Catherine Purse"
+date: "2024-11-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+* Load libraries
+```{r}
+library(phyloseq)
+library(tidyverse)
+library(microbiome)
+library(grafify)
+library(microViz)
+library(patchwork)
+```
+
+* Load otu_table, metadata, and taxa
+```{r}
+bins <- read.csv("novelSGBs_mergedabundance.csv")
+tax <- read.csv("novelSGBs_taxtable.csv")
+meta <- read.csv("SGBs_metadata_6189_Oct24.csv")
+```
+
+## Create phyloseq object
+
+* Alter bins/tax/meta dataframes so they are in the right format
+```{r}
+#create bin table in the right format (turn bin column into row names)
+bins <- bins %>% remove_rownames %>% column_to_rownames(var = "Genomic_bins")
+
+#do the same for taxonomy
+tax <- tax %>% remove_rownames %>% column_to_rownames(var = "user_genome")
+
+#and for metadata (uses a different method but does the same thing)
+meta <- meta %>%
+  tibble::column_to_rownames("sample")
+
+#strip white space from all (to make sure names match across sheets)
+tax <- tax %>%
+  mutate(across(where(is.character), str_trim))
+bins <- bins %>%
+  mutate(across(where(is.character), str_trim))
+meta <- meta %>%
+  mutate(across(where(is.character), str_trim))
+```
+
+* Convert otu_table (bins) and tax_table (tax) into matrices (required prior to constructing phyloseq object)
+```{r}
+bins_mat <- as.matrix(bins)
+tax_mat <- as.matrix(tax)
+```
+
+* Construct phyloseq object
+```{r}
+bins_ps <- otu_table(bins_mat, taxa_are_rows = TRUE)
+tax_ps <- tax_table(tax_mat)
+meta_ps <- sample_data(meta)
+
+ps <- phyloseq(bins_ps, tax_ps, meta_ps)
+```
+
+* Remove any SGBs identifiable to species level from the data
+```{r}
+# Remove rows where 'species' is not empty
+ps <- subset_taxa(ps, is.na(Species) | Species == "")
+
+# Check data
+unique(tax_table(ps)[,"Species"] )
+```
+
+## Clean taxonomy table
+
+* Remove prefixes from tax_table
+```{r}
+#view part of the tax table
+phyloseq::tax_table(ps)[1:10, 1:2]
+
+#replace _[A-Z] with ""
+tax_table(ps)[, colnames(tax_table(ps))] <- gsub(tax_table(ps)[, colnames(tax_table(ps))],     pattern = "[a-z]__", replacement = "")
+
+#check tax_table again
+phyloseq::tax_table(ps)[1:10, 1:2]
+```
+You can see that, for example, "Firmicutes_A" is replaced with just "Firmicutes".
+
+We can check that there are no other unusual naming conventions by looking at the unique taxa in each rank:
+```{r}
+unique(tax_table(ps)[,"Genus"] )
+```
+
+Next we will fill in any missing taxonomic information, using a function from the package microViz. This is especially apparent in the Species rank, where many entries appear to be missing. This would cause problems if we try to aggregate at different levels, so we will use tax_fix to fill in these values with those from the next higher taxonomic rank.
+
+```{r}
+ps_fix <- ps %>% tax_fix()
+```
+
+* Export phyloseq object for use in other scripts
+```{r}
+saveRDS(ps_fix, file = "sgb_phyloseq.rds")
+```
+
+* Remove empty samples
+```{r}
+any(sample_sums(ps_fix) == 0) #Result is TRUE
+# prune "empty" samples
+ps_fix <- prune_samples(sample_sums(ps_fix) > 0, ps_fix)
+```
+
+
+* Create a table of number of features for each Phylum
+```{r}
+rank_names(ps_fix)
+unique(tax_table(ps_fix)[,"Phylum"] )
+table(tax_table(ps_fix)[, "Phylum"], exclude = NULL)
+```
+
+* Explore feature prevalence, defined here as the number of samples in which a taxon appears at least once.
+```{r}
+# Compute prevalence of each feature, store as data.frame
+prevdf = apply(X = otu_table(ps_fix),
+               MARGIN = ifelse(taxa_are_rows(ps_fix), yes = 1, no = 2),
+               FUN = function(x){sum(x > 0)})
+# Add taxonomy and total read counts to this data.frame
+prevdf = data.frame(Prevalence = prevdf,
+                    TotalAbundance = taxa_sums(ps_fix),
+                    tax_table(ps_fix))
+
+#create empty temporary directory
+temp_dir <- tempdir()
+
+# Use ddply with the specified temporary directory
+result <- plyr::ddply(prevdf, "Phylum", function(df1) {
+  data.frame(MeanPrevalence = mean(df1$Prevalence),
+             SumPrevalence = sum(df1$Prevalence))
+}, .parallel = FALSE, .paropts = list(tmpdir = temp_dir))
+
+# Now, merge the two data frames by the "Phylum" column
+merged_data <- merge(prevdf, result, by = "Phylum")
+
+# Subset to the remaining phyla
+prevdf1 = subset(merged_data, Phylum %in% get_taxa_unique(ps_fix, "Phylum"))
+phyla_prev <- ggplot(prevdf1, aes(TotalAbundance, Prevalence / nsamples(ps_fix),color=Phylum)) +
+  geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Phylum) + theme_bw() +
+  theme(legend.position="none") +
+  theme_bw()
+  
+phyla_prev
+```
+
+# SGB prevalence - Kingdom/Phylum level
+```{r}
+# Count the number of OTUs for each phylum
+otu_counts <- aggregate(Prevalence ~ Phylum, data = prevdf1, FUN = length)
+
+# Rename the columns for clarity
+names(otu_counts)[2] <- "NumberOfSGBs"
+
+# Merge the counts back into the original dataframe
+data <- merge(prevdf1, otu_counts, by = "Phylum")
+
+agg_data <- data %>%
+  group_by(Phylum, Kingdom) %>%
+  dplyr::summarise(NumberOfSGBs = n(), .groups = 'drop')
+
+# Reorder phylum factor based on NumberOfOTUs
+agg_data <- agg_data %>%
+  mutate(Phylum = factor(Phylum, levels = agg_data %>%
+                           arrange(desc(NumberOfSGBs)) %>%
+                           pull(Phylum)))
+
+# Plot using the aggregated data
+sgb.prev <- ggplot(agg_data, aes(x = Phylum, y = NumberOfSGBs, fill = Kingdom)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Phylum", y = "Number of SGBs") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust=0.95)) +
+  geom_text(aes(label = NumberOfSGBs), vjust = -0.5, color = "black") +
+  scale_fill_manual(values = c("Bacteria" = "#77aadd", "Archaea" = "#ee8866")) + 
+  ylim(0,120)
+
+print(sgb.prev)
+
+tiff(file.path(folder_path, "sgb__kingdom_phylum.tiff"), units="in", width=5, height=2.5, res=300)
+plot(sgb.prev)
+dev.off()
+```
+
+
+# SGB prevalence - Class/Kingdom level
+```{r}
+# Count the number of OTUs for each phylum
+class_counts <- aggregate(Prevalence ~ Class, data = prevdf1, FUN = length)
+
+# Rename the columns for clarity
+names(class_counts)[2] <- "NumberOfSGBs"
+
+# Merge the counts back into the original dataframe
+class.data <- merge(prevdf1, class_counts, by = "Class")
+
+class.agg_data <- class.data %>%
+  group_by(Kingdom, Class) %>%
+  dplyr::summarise(NumberOfSGBs = n(), .groups = 'drop')
+
+# Reorder phylum factor based on NumberOfOTUs
+class.agg_data <- class.agg_data %>%
+  mutate(Class = factor(Class, levels = class.agg_data %>%
+                           arrange(desc(NumberOfSGBs)) %>%
+                           pull(Class)))
+
+
+cl.prev <- ggplot(class.agg_data, aes(x = Class, y = NumberOfSGBs, fill = Kingdom)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Class", y = "Number of SGBs") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.95)
+        ) +
+  geom_text(aes(label = NumberOfSGBs), vjust = -0.5, color = "black") +
+  scale_fill_manual(values = c("Bacteria" = "#77aadd", "Archaea" = "#ee8866")) +
+  ylim(0,120)
+cl.prev
+
+```
+
+# SGB prevalence - Order/Kingdom level
+```{r}
+# Count the number of OTUs for each phylum
+order_counts <- aggregate(Prevalence ~ Order, data = prevdf1, FUN = length)
+
+# Rename the columns for clarity
+names(order_counts)[2] <- "NumberOfSGBs"
+
+# Merge the counts back into the original dataframe
+ord.data <- merge(prevdf1, order_counts, by = "Order")
+
+ord.agg_data <- ord.data %>%
+  group_by(Order, Kingdom) %>%
+  dplyr::summarise(NumberOfSGBs = n(), .groups = 'drop')
+
+
+# Reorder phylum factor based on NumberOfOTUs
+ord.agg_data <- ord.agg_data %>%
+  mutate(Order = factor(Order, levels = ord.agg_data %>%
+                           arrange(desc(NumberOfSGBs)) %>%
+                           pull(Order)))
+
+# Plot using the aggregated data
+co.prev <- ggplot(ord.agg_data, aes(x = Order, y = NumberOfSGBs, fill = Kingdom)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Order", y = "Number of SGBs") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.95)
+        ) +
+  geom_text(aes(label = NumberOfSGBs), vjust = -0.5, color = "black") +
+  scale_fill_manual(values = c("Bacteria" = "#77aadd", "Archaea" = "#ee8866")) +
+  ylim(0,70)
+co.prev
+
+print(co.prev)
+```
+
+# SGB prevalence - Family/Kingdom level
+```{r}
+# Count the number of OTUs for each phylum
+fam_counts <- aggregate(Prevalence ~ Family, data = prevdf1, FUN = length)
+
+# Rename the columns for clarity
+names(fam_counts)[2] <- "NumberOfSGBs"
+
+# Merge the counts back into the original dataframe
+fam.data <- merge(prevdf1, fam_counts, by = "Family")
+
+fam.agg_data <- fam.data %>%
+  group_by(Family, Kingdom) %>%
+  dplyr::summarise(NumberOfSGBs = n(), .groups = 'drop')
+
+# Reorder phylum factor based on NumberOfOTUs
+fam.agg_data <- fam.agg_data %>%
+  mutate(Family = factor(Family, levels = fam.agg_data %>%
+                           arrange(desc(NumberOfSGBs)) %>%
+                           pull(Family)))
+
+# Plot using the aggregated data
+gf.prev <- ggplot(fam.agg_data, aes(x = Family, y = NumberOfSGBs, fill = Kingdom)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Family", y = "Number of SGBs") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust=0.95)) +
+  geom_text(aes(label = NumberOfSGBs), vjust = -0.5, color = "black") +
+  scale_fill_grafify(palette = "kelly", reverse = TRUE) +
+  scale_fill_manual(values = c("Bacteria" = "#77aadd", "Archaea" = "#ee8866")) +
+  ylim(0,70)
+
+
+print(gf.prev)
+
+sgb_pw <- sgb.prev / cl.prev / co.prev / gf.prev +
+   plot_layout(ncol = 1, guides = "collect", axis_titles = "collect") +
+  plot_annotation(tag_levels = 'A') +
+  theme(plot.tag.position = c(0, 1),
+      plot.tag = element_text(size = 12, hjust = 0, vjust = 0))
+sgb_pw
+
+folder_path <- "C:/Users/purse/OneDrive - Norwich BioScience Institutes/Results/NHP Bioinformatics/CM_Prokaryome_Paper_Oct2024/R_Analysis/Plots"
+tiff(file.path(folder_path, "sgb_prev_pw.tiff"), units="in", width=10, height=12, res=300)
+plot(sgb_pw)
+dev.off()
+```
+
+# Genus Heatmap - colour by family, segment by type
+```{r}
+#Melt ps.b to df
+ps.df <- psmelt(ps_fix)
+
+# make region a factor in the df (i.e. change order of facets in next step)
+ps.df$type <- factor(ps.df$type, levels=c("D", "J", "I", "C", "PC", "DC", "F"))
+
+# Order labels by age (using a unique identifier to account for duplicates in df)
+ps.df <- ps.df[order(ps.df$age, ps.df$age_label), ]
+ps.df$age_label <- factor(ps.df$age_label, levels = unique(ps.df$age_label))
+
+labels <- c(D = "D", J = "Jejunum", I = "Ileum", C = "Caecum", PC = "Proximal Colon", DC = "Distal Colon", F = "Faecal")
+
+sgb_gen <- ggplot(ps.df, aes(age_label, Genus, fill= Abundance, alpha = Abundance)) + 
+  theme_light() +
+  geom_tile(colour = "gray50") +
+     scale_fill_gradient(
+    low = "#CAEBC3", 
+  high = "#008856") +
+  scale_alpha_identity(guide = "none") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        axis.text.x = element_text(angle = 90, size=10, hjust = 0.95, vjust = 0.4),
+        strip.background =element_rect(fill="grey"),
+        strip.text = element_text(size = 12, face="bold", colour="white"),
+        axis.title.x = element_text(size = 12, color = "black"),
+        axis.title.y = element_text(size = 12, color = "black"),
+        ) +
+  facet_grid(~ type, space ="free", scales = "free", labeller = labeller(type = labels)) +
+  labs(x = "ID", y = "Genus", fill = "Abundance (CPM)")
+sgb_gen
+
+tiff(file.path(folder_path, "sgb_gen.tiff"), units="in", width=14.5, height=14, res=300)
+plot(sgb_gen)
+dev.off()
+```
